@@ -3,7 +3,7 @@ package App::Maisha::Plugin::Identica;
 use strict;
 use warnings;
 
-our $VERSION = '0.12';
+our $VERSION = '0.13';
 
 #----------------------------------------------------------------------------
 # Library Modules
@@ -15,7 +15,7 @@ use Net::Identica;
 #----------------------------------------------------------------------------
 # Accessors
 
-__PACKAGE__->mk_accessors($_) for qw(api);
+__PACKAGE__->mk_accessors($_) for qw(api users);
 
 #----------------------------------------------------------------------------
 # Public API
@@ -36,7 +36,21 @@ sub login {
     return 0    unless($api);
 
     $self->api($api);
+    print "...building user cache for Identica\n";
+    $self->_build_users();
     return 1;
+}
+
+sub _build_users {
+    my $self = shift;
+    my %users;
+
+    my $f = $self->api->friends();
+    if($f && @$f)   { for(@$f) { next unless($_); $users{$_->{screen_name}} = 1 } }
+    $f = $self->api->followers();
+    if($f && @$f)   { for(@$f) { next unless($_); $users{$_->{screen_name}} = 1 } }
+
+    $self->users(\%users);
 }
 
 sub api_update

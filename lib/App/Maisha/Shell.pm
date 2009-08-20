@@ -3,7 +3,7 @@ package App::Maisha::Shell;
 use strict;
 use warnings;
 
-our $VERSION = '0.12';
+our $VERSION = '0.13';
 
 #----------------------------------------------------------------------------
 
@@ -150,13 +150,7 @@ sub comp_use {
 
 sub run_followers {
     my $self = shift;
-    my $ret  = $self->_command('followers');
-
-    if ($ret) {
-        foreach my $rec (@$ret) {
-            printf( "[%s] %s\n", $rec->{screen_name}, ($rec->{status}{text} || ''));
-        }
-    }
+    $self->_run_snapshot('followers',@_);
 }
 sub smry_followers { "display followers' status" }
 sub help_followers {
@@ -172,13 +166,7 @@ END
 
 sub run_friends {
     my $self = shift;
-    my $ret  = $self->_command('friends');
-
-    if ($ret) {
-        foreach my $friend (@$ret) {
-            printf( "[%s] %s\n", $friend->{screen_name}, ($friend->{status}{text} || ''));
-        }
-    }
+    $self->_run_snapshot('friends',@_);
 }
 sub smry_friends { "display friends' status" }
 sub help_friends {
@@ -223,6 +211,16 @@ sub help_user {
     <<'END';
 Displays a user profile.
 END
+}
+
+sub comp_user {
+    my ($self, $word, $line, $start_index) = @_;
+    my $services = $self->services;
+    my $service  = $services->[0] || return;
+    return  unless($service && $service->can('users'));
+
+    my $users = $service->users;
+    return grep { /^$word/ } keys %$users;
 }
 
 
@@ -278,12 +276,7 @@ END
 
 sub run_friends_timeline {
     my $self = shift;
-    my $ret  = $self->_command('friends_timeline');
-
-    if ($ret) {
-        my $limit = @_ && $_[0] =~ /^\d+$/ ? shift : $self->limit;
-        $self->_print_messages($limit,'user',$ret);
-    }
+    $self->_run_timeline('friends_timeline',undef,@_);
 }
 
 sub smry_friends_timeline { "display friends' status as a timeline" }
@@ -304,12 +297,7 @@ sub smry_ft { "alias to friends_timeline" }
 
 sub run_public_timeline {
     my $self = shift;
-    my $ret  = $self->_command('public_timeline');
-
-    if ($ret) {
-        my $limit = @_ && $_[0] =~ /^\d+$/ ? shift : $self->limit;
-        $self->_print_messages($limit,'user',$ret);
-    }
+    $self->_run_timeline('public_timeline',undef,@_);
 }
 
 sub smry_public_timeline { "display public status as a timeline" }
@@ -338,15 +326,7 @@ sub run_user_timeline {
         return;
     }
 
-    my $ref = { id => $user };
-    my $ret = $self->_command('user_timeline',$ref);
-
-    print "count=".(scalar(@$ret))."\n";
-
-    if ($ret) {
-        my $limit = @_ && $_[0] =~ /^\d+$/ ? shift : $self->limit;
-        $self->_print_messages($limit,'user',$ret);
-    }
+    $self->_run_timeline('user_timeline',$user,@_);
 }
 
 sub smry_user_timeline { "display named user statuses as a timeline" }
@@ -355,10 +335,12 @@ sub help_user_timeline {
 Displays the most recent status messages for a specified user.
 END
 }
+*comp_user_timeline = \&comp_user;
 
 *run_ut = \&run_user_timeline;
 sub smry_ut { "alias to user_timeline" }
 *help_ut = \&help_user_timeline;
+*comp_ut = \&comp_user;
 
 
 #
@@ -367,12 +349,7 @@ sub smry_ut { "alias to user_timeline" }
 
 sub run_replies {
     my $self = shift;
-    my $ret  = $self->_command('replies');
-
-    if ($ret) {
-        my $limit = @_ && $_[0] =~ /^\d+$/ ? shift : $self->limit;
-        $self->_print_messages($limit,'user',$ret);
-    }
+    $self->_run_timeline('replies',undef,@_);
 }
 
 sub smry_replies { "display reply messages that refer to you" }
@@ -394,12 +371,18 @@ sub smry_re { "alias to replies" }
 sub run_direct_messages {
     my $self = shift;
     my $frto = @_ && $_[0] =~ /^from|to$/ ? shift : 'to';
-    my $ret  = $self->_command('direct_messages_' . $frto);
 
-    if ($ret) {
-        my $limit = @_ && $_[0] =~ /^\d+$/ ? shift : $self->limit;
-        $self->_print_messages($limit,($frto eq 'to' ? 'sender' : 'recipient'),$ret);
+    my ($limit,$max) = $self->_get_limits(@_);
+
+    my @res;
+    for my $page (1..$max) {
+        my $ref = {page => $page};
+        my $ret = $self->_command('direct_messages_' . $frto,$ref);
+        push @res, @$ret;
     }
+
+    return  unless(@res);
+    $self->_print_messages($limit,($frto eq 'to' ? 'sender' : 'recipient'),\@res);
 }
 
 sub smry_direct_messages { "display direct messages that have been sent to you" }
@@ -452,6 +435,10 @@ Posts a message (upto 140 characters), to a named user.
 END
 }
 
+*comp_send_message = \&comp_user;
+*comp_send = \&comp_user;
+*comp_sm = \&comp_user;
+
 *run_send = \&run_send_message;
 sub smry_send { "alias to send_message" }
 *help_send = \&help_send_message;
@@ -495,10 +482,13 @@ Posts a message (upto 140 characters).
 END
 }
 
+*comp_update = \&comp_user;
+
 # help
 *run_say = \&run_update;
 sub smry_say { "alias to 'update'" }
 *help_say = \&help_update;
+*comp_say = \&comp_user;
 
 
 #
@@ -601,6 +591,46 @@ sub _elem {
     return $value;
 }
 
+sub _run_snapshot {
+    my $self = shift;
+    my $cmd  = shift;
+
+    my ($limit,$max) = $self->_get_limits_all(@_);
+
+    my @res;
+    if($max) {
+        for my $page (1..$max) {
+            my $ref = {page => $page};
+            my $ret = $self->_command($cmd,$ref);
+            push @res, @$ret;
+        }
+    } else {
+        my $ret = $self->_command($cmd);
+        push @res, @$ret;
+    }
+
+    return  unless(@res);
+    $self->_print_messages($limit,undef,\@res);
+}
+
+sub _run_timeline {
+    my $self = shift;
+    my $cmd  = shift;
+    my $user = shift;
+    my ($limit,$max) = $self->_get_limits(@_);
+
+    my @res;
+    for my $page (1..$max) {
+        my $ref = {id => $user, page => $page};
+        my $ret = $self->_command($cmd,$ref);
+        next    unless($ret);
+        push @res, @$ret;
+    }
+
+    return  unless(@res);
+    $self->_print_messages($limit,'user',\@res);
+}
+
 sub _command {
     my $self = shift;
     my $cmd  = shift;
@@ -615,7 +645,7 @@ sub _command {
     my $ret    = $service->$method(@_);
 
     if ($ret) {
-        print "$cmd ok\n";
+        #print "$cmd ok\n";
     } else {
         print "Command $cmd failed :(\n";
     }
@@ -669,18 +699,41 @@ sub _print_messages {
 
 sub _format_message {
     my ($self,$mess,$who) = @_;
+    my ($user,$text);
 
     my $network = $self->networks();
     $network =~ s!^.*?\[([^\]]+)\].*!$1!s;
 
     my $timestamp = $mess->{created_at};
+    if($who) {
+        $user = $mess->{$who}{screen_name};
+        $text = $mess->{text};
+    } else {
+        $user = $mess->{screen_name};
+        $text = $mess->{status}{text};
+        $text ||= '';
+    }
 
     my $format = $self->format;
-    $format =~ s!\%U!$mess->{$who}{screen_name}!g;
-    $format =~ s!\%M!$mess->{text}!g;
+    $format =~ s!\%U!$user!g;
+    $format =~ s!\%M!$text!g;
     $format =~ s!\%T!$timestamp!g;
     $format =~ s!\%N!$network!g;
     return $format;
+}
+
+sub _get_limits {
+    my $self = shift;
+    my $limit = @_ && $_[0] =~ /^\d+$/ ? shift : $self->limit;
+    my $max   = $limit ? int($limit / 20) + ($limit % 20 ? 1 : 0) : 1;
+    return($limit,$max);
+}
+
+sub _get_limits_all {
+    my $self = shift;
+    my $limit = @_ && $_[0] =~ /^\d+$/ ? shift : undef;
+    my $max   = $limit ? int($limit / 20) + ($limit % 20 ? 1 : 0) : undef;
+    return($limit,$max);
 }
 
 sub _load_plugins {
@@ -894,6 +947,7 @@ The user methods provide the handlers display the profile of a named user.
 =item * run_user
 =item * help_user
 =item * smry_user
+=item * comp_user
 
 =back
 
@@ -907,10 +961,12 @@ command. Note that the 'ut' is an alias to 'user_timeline'.
 =item * run_user_timeline
 =item * help_user_timeline
 =item * smry_user_timeline
+=item * comp_user_timeline
 
 =item * run_ut
 =item * help_ut
 =item * smry_ut
+=item * comp_ut
 
 =back
 
@@ -970,10 +1026,12 @@ The update methods provide the handlers for the 'update' command. Note that
 =item * run_update
 =item * help_update
 =item * smry_update
+=item * comp_update
 
 =item * run_say
 =item * help_say
 =item * smry_say
+=item * comp_say
 
 =back
 
@@ -1035,14 +1093,17 @@ Note that both 'send' and 'sm' are aliases to 'send_message'
 =item * run_send_message
 =item * help_send_message
 =item * smry_send_message
+=item * comp_send_message
 
 =item * run_send
 =item * help_send
 =item * smry_send
+=item * comp_send
 
 =item * run_sm
 =item * help_sm
 =item * smry_sm
+=item * comp_sm
 
 =back
 
