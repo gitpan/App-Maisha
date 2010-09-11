@@ -3,7 +3,7 @@ package App::Maisha::Plugin::Base;
 use strict;
 use warnings;
 
-our $VERSION = '0.13';
+our $VERSION = '0.14';
 
 #----------------------------------------------------------------------------
 # Public API
@@ -126,7 +126,7 @@ L<App::Maisha>
 
 =head1 AUTHOR
 
-  Copyright (c) 2009 Barbie <barbie@cpan.org> for Grango.org.
+  Copyright (c) 2009-2010 Barbie <barbie@cpan.org> for Grango.org.
 
 =head1 LICENSE
 

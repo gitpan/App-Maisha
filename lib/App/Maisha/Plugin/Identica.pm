@@ -3,7 +3,7 @@ package App::Maisha::Plugin::Identica;
 use strict;
 use warnings;
 
-our $VERSION = '0.13';
+our $VERSION = '0.14';
 
 #----------------------------------------------------------------------------
 # Library Modules
@@ -21,10 +21,14 @@ __PACKAGE__->mk_accessors($_) for qw(api users);
 # Public API
 
 sub login {
-    my ($self,$user,$pass) = @_;
+    my ($self,$config) = @_;
+    
+    unless($config->{username}) { warn "No username supplied\n"; return }
+    unless($config->{password}) { warn "No password supplied\n"; return }
+
     my $api = Net::Identica->new(
-        username    => $user,
-        password    => $pass,
+        username    => $config->{username},
+        password    => $config->{password},
         source      => $self->{source},
         useragent   => $self->{useragent},
         clientname  => $self->{clientname},
@@ -32,8 +36,10 @@ sub login {
         clienturl   => $self->{clienturl}
     );
 
-    warn "Unable to establish Identica API\n"   unless($api);
-    return 0    unless($api);
+    unless($api) {
+        warn "Unable to establish connection to Identica API\n";
+        return 0;
+    }
 
     $self->api($api);
     print "...building user cache for Identica\n";
@@ -53,68 +59,57 @@ sub _build_users {
     $self->users(\%users);
 }
 
-sub api_update
-{
+sub api_update {
     my $self = shift;
     $self->api->update(@_);
 }
 
-sub api_user
-{
+sub api_user {
     my $self = shift;
     $self->api->show_user(@_);
 }
 
-sub api_user_timeline
-{
+sub api_user_timeline {
     my $self = shift;
     $self->api->user_timeline(@_);
 }
 
-sub api_friends
-{
+sub api_friends {
     my $self = shift;
     $self->api->friends();
 }
 
-sub api_friends_timeline
-{
+sub api_friends_timeline {
     my $self = shift;
     $self->api->friends_timeline();
 }
 
-sub api_public_timeline
-{
+sub api_public_timeline {
     my $self = shift;
     $self->api->public_timeline();
 }
 
-sub api_followers
-{
+sub api_followers {
     my $self = shift;
     $self->api->followers();
 }
 
-sub api_replies
-{
+sub api_replies {
     my $self = shift;
     $self->api->replies();
 }
 
-sub api_send_message
-{
+sub api_send_message {
     my $self = shift;
     $self->api->new_direct_message(@_);
 }
 
-sub api_direct_messages_to
-{
+sub api_direct_messages_to {
     my $self = shift;
     $self->api->direct_messages();
 }
 
-sub api_direct_messages_from
-{
+sub api_direct_messages_from {
     my $self = shift;
     $self->api->sent_direct_messages();
 }
@@ -209,7 +204,7 @@ L<Net::Identica>
 
 =head1 AUTHOR
 
-  Copyright (c) 2009 Barbie <barbie@cpan.org> for Grango.org.
+  Copyright (c) 2009-2010 Barbie <barbie@cpan.org> for Grango.org.
 
 =head1 LICENSE
 
