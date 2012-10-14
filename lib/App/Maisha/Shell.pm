@@ -3,7 +3,7 @@ package App::Maisha::Shell;
 use strict;
 use warnings;
 
-our $VERSION = '0.17';
+our $VERSION = '0.18';
 
 #----------------------------------------------------------------------------
 
@@ -47,6 +47,13 @@ my %months = (
     'Sep' => 9,     'Oct' => 10,    'Nov' => 11,    'Dec' => 12,
 );
 
+my %max = (
+    user_timeline   => { limit => 3200, count =>  200 },    # specific user timelines
+    search_tweets   => { limit =>  800, count =>  100 },    # search lists
+    home_timeline   => { limit =>  800, count =>  200 },    # generic timelines
+    user_lists      => { limit => 5000, count => 5000 },    # user lists
+);
+
 #----------------------------------------------------------------------------
 # Accessors
 
@@ -59,8 +66,9 @@ sub services   { shift->_elem('services',       @_) }
 sub pager      { shift->_elem('pager',          @_) }
 sub format     { shift->_elem('format',         @_) }
 sub chars      { shift->_elem('chars',          @_) }
-sub debug      { shift->_elem('debug',          @_) }
 sub history    { shift->_elem('historyfile',    @_) }
+sub debug      { shift->_elem('debug',          @_) }
+sub error      { shift->_elem('error',          @_) }
 
 #----------------------------------------------------------------------------
 # Public API
@@ -162,7 +170,7 @@ sub comp_use {
 
 sub run_followers {
     my $self = shift;
-    $self->_run_snapshot('followers',@_);
+    $self->_run_snapshot('followers',$max{user_lists},@_);
 }
 sub smry_followers { "display followers' status" }
 sub help_followers {
@@ -179,7 +187,7 @@ END
 
 sub run_friends {
     my $self = shift;
-    $self->_run_snapshot('friends',@_);
+    $self->_run_snapshot('friends',$max{user_lists},@_);
 }
 sub smry_friends { "display friends' status" }
 sub help_friends {
@@ -203,7 +211,7 @@ sub run_user {
         return;
     }
 
-    my $ref = { id => $user };
+    my $ref = { screen_name => $user };
     my $ret = $self->_command('user', $ref);
 
     print "\n";
@@ -252,7 +260,7 @@ sub run_follow {
         return;
     }
 
-    my $ref = { id => $user };
+    my $ref = { screen_name => $user };
     my $ret = $self->_command('follow', $ref);
 }
 sub smry_follow { "follow a named user" }
@@ -275,7 +283,7 @@ sub run_unfollow {
         return;
     }
 
-    my $ref = { id => $user };
+    my $ref = { screen_name => $user };
     my $ret = $self->_command('unfollow', $ref);
 }
 sub smry_unfollow { "unfollow a named user" }
@@ -293,7 +301,7 @@ END
 
 sub run_friends_timeline {
     my $self = shift;
-    $self->_run_timeline('friends_timeline',undef,@_);
+    $self->_run_timeline('friends_timeline',$max{home_timeline},undef,@_);
 }
 
 sub smry_friends_timeline { "display friends' status as a timeline" }
@@ -315,7 +323,7 @@ sub smry_ft { "alias to friends_timeline" }
 
 sub run_public_timeline {
     my $self = shift;
-    $self->_run_timeline('public_timeline',undef,@_);
+    $self->_run_timeline('public_timeline',$max{home_timeline},undef,@_);
 }
 
 sub smry_public_timeline { "display public status as a timeline" }
@@ -345,7 +353,7 @@ sub run_user_timeline {
         return;
     }
 
-    $self->_run_timeline('user_timeline',$user,@_);
+    $self->_run_timeline('user_timeline',$max{user_timeline},$user,@_);
 }
 
 sub smry_user_timeline { "display named user statuses as a timeline" }
@@ -369,7 +377,7 @@ sub smry_ut { "alias to user_timeline" }
 
 sub run_replies {
     my $self = shift;
-    $self->_run_timeline('replies',undef,@_);
+    $self->_run_timeline('replies',$max{home_timeline},undef,@_);
 }
 
 sub smry_replies { "display reply messages that refer to you" }
@@ -392,18 +400,40 @@ sub smry_re { "alias to replies" }
 sub run_direct_messages {
     my $self = shift;
     my $frto = @_ && $_[0] =~ /^from|to$/ ? shift : 'to';
+    my $num  = shift;
 
-    my ($limit,$max) = $self->_get_limits(@_);
+    my ($limit,$pages,$count) = $self->_get_limits($max{home_timeline},$num,$self->limit);
 
-    my @res;
-    for my $page (1..$max) {
-        my $ref = {page => $page};
-        my $ret = $self->_command('direct_messages_' . $frto,$ref);
-        push @res, @$ret;
+    my (@pages,@results,$max_id);
+    for my $page (1 .. $pages) {
+        my $ref = {};
+        $ref->{max_id}      = $max_id-1 if($max_id);
+        $ref->{count}       = $count    if($count);
+
+        my $ret;
+        eval { $ret = $self->_command('direct_messages_' . $frto,$ref) };
+
+        if(($@ || !$ret) && $self->error =~ /This application is not allowed to access or delete your direct messages/) {
+            print "WARNING: Your OAuth keys need updating.\n";
+            eval { $ret = $self->_command('reauthorize') };
+            return  unless($ret);
+
+            # okay retry
+            eval { $ret = $self->_command('direct_messages_' . $frto,$ref) };
+            return  if($@);
+        }
+
+        last    unless($ret);
+        last    if($max_id && $max_id == $ret->[-1]{id});
+        unshift @pages, $ret;
+        $max_id = $ret->[-1]{id};
     }
 
-    return  unless(@res);
-    $self->_print_messages($limit,($frto eq 'to' ? 'sender' : 'recipient'),\@res);
+    return  unless(@pages);
+    for my $page (@pages) {
+        push @results, @$page;
+    }
+    $self->_print_messages($limit,($frto eq 'to' ? 'sender' : 'recipient'),\@results);
 }
 
 sub smry_direct_messages { "display direct messages that have been sent to you" }
@@ -446,7 +476,7 @@ sub run_send_message {
         return;
     }
 
-    my $ref = { user => $user, text => $mess };
+    my $ref = { screen_name => $user, text => $mess };
     $self->_command('send_message', $ref);
 }
 
@@ -513,6 +543,45 @@ END
 sub smry_say { "alias to 'update'" }
 *help_say = \&help_update;
 *comp_say = \&comp_user;
+
+
+#
+# Search
+#
+
+sub run_search {
+    my $self = shift;
+    my (undef,$text) = split(' ',$self->line(),2);
+    $text =~ s/^\s+//;
+    $text =~ s/\s+$//;
+
+    my $limit;
+    if($text =~ /^(\d+)\s+(.*)/) {
+        ($limit,$text) = ($1,$2);
+    }
+
+    unless($text) {
+        print "cannot search for an empty string\n\n";
+        return;
+    }
+
+    my $len = length $text;
+    if($len > 1000) {
+        print "search term is too long: $len/1000\n\n";
+        return;
+    }
+#print "limit=$limit, text=$text\n";
+    $self->_run_results('search',$max{search_tweets},$limit,$text);
+}
+sub smry_search { "search for messages" }
+sub help_search {
+    <<'END';
+
+Search for messages with a given search term. The given search term can
+contain up to 1000 characters.
+END
+}
+
 
 
 #
@@ -681,50 +750,98 @@ sub _elem {
 }
 
 sub _run_snapshot {
-    my $self = shift;
-    my $cmd  = shift;
+    my ($self,$cmd,$max,$num) = @_;
+    my (@pages,@results,$max_id);
+    my ($limit,$pages,$count) = $self->_get_limits($max,$num);
 
-    my ($limit,$max) = $self->_get_limits_all(@_);
+    if($pages) {
+        for my $page (1 .. $pages) {
+            my $ref = {};
+            $ref->{max_id}  = $max_id-1 if($max_id);
+            $ref->{count}   = $count    if($count);
 
-    my @res;
-    if($max) {
-        for my $page (1..$max) {
-            my $ref = {page => $page};
             my $ret;
             eval { $ret = $self->_command($cmd,$ref) };
-            push @res, @$ret    if($ret);
+            last    unless($ret);
+            last    if($max_id && $max_id == $ret->[-1]{id});
+            unshift @pages, @$ret;
+            $max_id = $ret->[-1]{id};
         }
     } else {
         my $ret;
         eval { $ret = $self->_command($cmd) };
-        push @res, @$ret    if($ret);
+        push @pages, @$ret  if($ret);
     }
 
-    return  unless(@res);
-    $self->_print_messages($limit,undef,\@res);
+    return  unless(@pages);
+    for my $page (@pages) {
+        push @results, @$page;
+    }
+    $self->_print_messages($limit,undef,\@results);
+}
+
+sub _run_results {
+    my ($self,$cmd,$max,$num,$term) = @_;
+    my (@pages,@results,$max_id);
+    my ($limit,$pages,$count) = $self->_get_limits($max,$num);
+
+    if($pages) {
+        for my $page (1 .. $pages) {
+            my $ref = {};
+            $ref->{max_id}  = $max_id-1 if($max_id);
+            $ref->{count}   = $count    if($count);
+
+            my $ret;
+            eval { $ret = $self->_command($cmd,$term,$ref) };
+            last    unless($ret);
+            last    if($max_id && $max_id == $ret->[-1]{id});
+            unshift @pages, [ @{$ret->{results}} ];
+            $max_id = $ret->{results}[-1]{id};
+        }
+    } else {
+        my $ret;
+        eval { $ret = $self->_command($cmd,$term) };
+        push @pages, [ @{$ret->{results}} ]   if($ret);
+    }
+
+    return  unless(@pages);
+    for my $page (@pages) {
+        push @results, @$page;
+    }
+    $self->_print_messages($limit,undef,\@results);
 }
 
 sub _run_timeline {
-    my $self = shift;
-    my $cmd  = shift;
-    my $user = shift;
-    my ($limit,$max) = $self->_get_limits(@_);
+    my ($self,$cmd,$max,$user,$num) = @_;
+    my ($limit,$pages,$count) = $self->_get_limits($max,$num,$self->limit);
 
-    my @res;
-    for my $page (1..$max) {
-        my $ref = {id => $user, page => $page};
+    my (@pages,@results,$max_id);
+    for my $page (1 .. $pages) {
+        my $ref = {};
+        $ref->{screen_name} = $user     if($user);
+        $ref->{max_id}      = $max_id-1 if($max_id);
+        $ref->{count}       = $count    if($count);
+
         my $ret;
         eval { $ret = $self->_command($cmd,$ref) };
-        push @res, @$ret    if($ret);
+        last    unless($ret);
+        last    if($max_id && $max_id == $ret->[-1]{id});
+        unshift @pages, $ret;
+        $max_id = $ret->[-1]{id};
     }
 
-    return  unless(@res);
-    $self->_print_messages($limit,'user',\@res);
+    return  unless(@pages);
+    for my $page (@pages) {
+        push @results, @$page;
+    }
+    $self->_print_messages($limit,'user',\@results);
 }
 
 sub _command {
     my $self = shift;
     my $cmd  = shift;
+
+    $self->error('');
 
     my $services = $self->services;
     return  unless(defined $services && @$services);
@@ -738,6 +855,7 @@ sub _command {
 
     if ($@) {
         print "Command $cmd failed :(" . ($self->debug ? " [$@]" : '') . "\n";
+        $self->error($@);
     } elsif(!$ret) {
         print "Command $cmd failed :(\n";
     } else {
@@ -750,6 +868,8 @@ sub _command {
 sub _commands {
     my $self = shift;
     my $cmd  = shift;
+
+    $self->error('');
 
     my $services = $self->services;
     return  unless(defined $services && @$services);
@@ -765,7 +885,8 @@ sub _commands {
         eval { $ret = $service->$method(@_) };
 
         if ($@) {
-            print "[$class] Command $cmd failed :( [$@]\n";
+            print "[$class] Command $cmd failed :(" . ($self->debug ? " [$@]" : '') . "\n";
+            $self->error("[$class] $@");
         } elsif(!$ret) {
             print "[$class] Command $cmd failed :(\n";
         } else {
@@ -804,17 +925,19 @@ sub _format_message {
     $network =~ s!^.*?\[([^\]]+)\].*!$1!s;
 
     my $timestamp = $mess->{created_at};
-    my (@dt) = $timestamp =~ /\w+\s+(\w+)\s+(\d+)\s+([\d:]+)\s+\S+\s+(\d+)/; # Sat Oct 13 19:01:19 +0000 2012
-    my $datetime = sprintf "%02d/%02d/%04d %s", $dt[1], $months{$dt[0]}, $dt[3], $dt[2];
-    my $date = sprintf "%02d/%02d/%04d", $dt[1], $months{$dt[0]}, $dt[3];
-    my $time = $dt[2];
+    my ($M,$D,$T,$Y) = $timestamp =~ /\w+\s+(\w+)\s+(\d+)\s+([\d:]+)\s+\S+\s+(\d+)/; # Sat Oct 13 19:01:19 +0000 2012
+    ($D,$M,$Y,$T) = $timestamp =~ /\w+,\s+(\d+)\s+(\w+)\s+(\d+)\s+([\d:]+)/ unless($M); # Sat, 13 Oct 2012 19:01:19 +0000
+
+    my $datetime = sprintf "%02d/%02d/%04d %s", $D, $months{$M}, $Y, $T;
+    my $date = sprintf "%02d/%02d/%04d", $D, $months{$M}, $Y;
+    my $time = $T;
 
     if($who) {
         $user = $mess->{$who}{screen_name};
         $text = $mess->{text};
     } else {
-        $user = $mess->{screen_name};
-        $text = $mess->{status}{text};
+        $user = $mess->{screen_name}  || $mess->{from_user};
+        $text = $mess->{status}{text} || $mess->{text};
         $text ||= '';
     }
 
@@ -830,17 +953,18 @@ sub _format_message {
 }
 
 sub _get_limits {
-    my $self = shift;
-    my $limit = @_ && $_[0] =~ /^\d+$/ ? shift : $self->limit;
-    my $max   = $limit ? int($limit / 20) + ($limit % 20 ? 1 : 0) : 1;
-    return($limit,$max);
-}
+    my ($self,$max,$limit,$default) = @_;
+    $limit ||= $default;
+    return  unless($limit);
 
-sub _get_limits_all {
-    my $self = shift;
-    my $limit = @_ && $_[0] =~ /^\d+$/ ? shift : undef;
-    my $max   = $limit ? int($limit / 20) + ($limit % 20 ? 1 : 0) : undef;
-    return($limit,$max);
+    return  unless($limit =~ /^\d+$/);
+    $limit = $max->{limit}  if($limit > $max->{limit});
+    my $count = $max->{count};
+
+    return($limit,1,$limit) if($limit <= $count);
+
+    my $pages = int($limit / $count) + ($limit % $count ? 1 : 0);
+    return($limit,$pages,$count);
 }
 
 sub _load_plugins {
@@ -932,7 +1056,7 @@ as:
   %U - username or screen name
   %M - status message
   %T - timestamp (e.g. Sat Oct 13 19:29:17 +0000 2012)
-  %D - datetime (e.g. 13/10/2012 19:29:17)
+  %D - datetime  (e.g. 13/10/2012 19:29:17)
   %d - date only (e.g. 13/10/2012)
   %t - time only (e.g. 19:29:17)
   %N - network
@@ -945,13 +1069,17 @@ knowing the exact screen width being used. As such you can specify a width for
 the wrapper to use to ensure the messages are correctly line wrapped. The
 default setting is 80.
 
+=item * history
+
+Provides the history file, if available.
+
 =item * debug
 
 Boolean setting for debugging messages.
 
-=item * history
+=item * error
 
-Provides the history file, if available.
+The last error message received from a failing command.
 
 =back
 
@@ -1090,6 +1218,10 @@ The user methods provide the handlers display the profile of a named user.
 The user timeline methods provide the handlers for the 'user_timeline'
 command. Note that the 'ut' is an alias to 'user_timeline'.
 
+The user_timeline command has one optional parameter:
+
+  maisha> ut [limit]
+
 =over 4
 
 =item * run_user_timeline
@@ -1129,6 +1261,10 @@ The friends methods provide the handlers for the 'friends' command.
 The friends timeline methods provide the handlers for the 'friends_timeline'
 command. Note that the 'ft' is an alias to 'friends_timeline'.
 
+The friends_timeline command has one optional parameter:
+
+  maisha> ft [limit]
+
 =over 4
 
 =item * run_friends_timeline
@@ -1149,6 +1285,10 @@ command. Note that the 'ft' is an alias to 'friends_timeline'.
 
 The public timeline methods provide the handlers for the 'public_timeline'
 command. Note that the 'pt' is an alias to 'public_timeline'.
+
+The public_timeline command has one optional parameter:
+
+  maisha> pt [limit]
 
 =over 4
 
@@ -1196,6 +1336,10 @@ The update methods provide the handlers for the 'update' command. Note that
 The reply methods provide the handlers for the 'replies' command. Note that
 're' is an aliases for 'replies'
 
+The replies command has one optional parameter:
+
+  maisha> re [limit]
+
 =over 4
 
 =item * run_replies
@@ -1217,7 +1361,7 @@ The reply methods provide the handlers for the 'replies' command. Note that
 The direct message methods provide the handlers for the 'direct_message'
 command. Note that 'dm' is an aliases for 'direct_message'.
 
-The direct_message command has to optional parameters:
+The direct_message command has two optional parameters:
 
   maisha> dm [from|to] [limit]
 
@@ -1280,9 +1424,35 @@ Note that both 'send' and 'sm' are aliases to 'send_message'
 
 =back
 
+=head2 Search Methods
+
+These methods provide the handlers for the 'search' command.
+
+The search command has one optional, and one mandatory parameter:
+
+  maisha> search [limit] term [term ...]
+
+  maisha> search term
+  maisha> search 10 term
+  maisha> search a really long search term
+  maisha> search 20 a really long search term
+
+If the first parameter is a number, this will be treated as the limit value,
+used to limit the number of messages displayed.
+
+=over 4
+
+=item * run_search
+
+=item * help_search
+
+=item * smry_search
+
+=back
+
 =head2 About Methods
 
-The quit methods provide the handlers for the 'about' command.
+These methods provide the handlers for the 'about' command.
 
 =over 4
 
@@ -1314,7 +1484,7 @@ The debug methods provide more verbose error mesages if commands fail.
 
 The debug command has two optional parameters:
 
-  maisha> debug [on|off]
+  maisha> debug on|off
 
   maisha> debug on
   maisha> debug off

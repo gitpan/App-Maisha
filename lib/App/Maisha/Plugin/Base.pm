@@ -3,7 +3,7 @@ package App::Maisha::Plugin::Base;
 use strict;
 use warnings;
 
-our $VERSION = '0.17';
+our $VERSION = '0.18';
 
 #----------------------------------------------------------------------------
 # Public API
@@ -12,9 +12,9 @@ sub new {
     my $class = shift;
     my $self = {
         source      => 'maisha',
-        useragent   => 'Maisha/0.17 (Perl)',
+        useragent   => 'Maisha/0.18 (Perl)',
         clientname  => 'Maisha',
-        clientver   => '0.17',
+        clientver   => '0.18',
         clienturl   => 'http://maisha.grango.org'
     };
 
@@ -39,6 +39,8 @@ sub api_direct_messages_from    {}
 
 sub api_follow                  {}
 sub api_unfollow                {}
+
+sub api_search                  {}
 
 1;
 
@@ -104,6 +106,8 @@ The API methods are used to interface to with the Twitter API.
 =item * api_direct_messages_to
 
 =item * api_direct_messages_from
+
+=item * api_search
 
 =back
 
