@@ -1,9 +1,7 @@
-#!perl
-
+#!/usr/bin/perl -w
 use strict;
-use warnings;
 
-use Test::More tests => 42;
+use Test::More tests => 50;
 use App::Maisha;
 use App::Maisha::Shell;
 
@@ -39,6 +37,8 @@ for my $k ( qw/
     pager
     format
     chars
+    debug
+    history
 / ){
   my $label = "[$k]";
   SKIP: {
@@ -49,4 +49,3 @@ for my $k ( qw/
     eval { is( $obj->$k, 123, "$label get" ) };
   };
 }
-

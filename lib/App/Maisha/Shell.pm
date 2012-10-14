@@ -3,7 +3,7 @@ package App::Maisha::Shell;
 use strict;
 use warnings;
 
-our $VERSION = '0.15';
+our $VERSION = '0.16';
 
 #----------------------------------------------------------------------------
 
@@ -27,6 +27,10 @@ websites and services, such as Identica and Twitter.
 # Library Modules
 
 use base qw(Term::Shell);
+
+use File::Basename;
+use File::Path;
+use IO::File;
 use Module::Pluggable   instantiate => 'new', search_path => ['App::Maisha::Plugin'];
 use Text::Wrap;
 
@@ -37,22 +41,33 @@ $Text::Wrap::columns = 80;
 
 my %plugins;    # contains all available plugins
 
+my %months = (
+    'Jan' => 1,     'Feb' => 2,     'Mar' => 3,     'Apr' => 4,
+    'May' => 5,     'Jun' => 6,     'Jul' => 7,     'Aug' => 8,
+    'Sep' => 9,     'Oct' => 10,    'Nov' => 11,    'Dec' => 12,
+);
+
 #----------------------------------------------------------------------------
 # Accessors
 
-sub networks   { shift->_elem('networks',   @_) }
-sub prompt_str { shift->_elem('prompt_str', @_) }
-sub tag_str    { shift->_elem('tag_str',    @_) }
-sub order      { shift->_elem('order',      @_) }
-sub limit      { shift->_elem('limit',      @_) }
-sub services   { shift->_elem('services',   @_) }
-sub pager      { shift->_elem('pager',      @_) }
-sub format     { shift->_elem('format',     @_) }
-sub chars      { shift->_elem('chars',      @_) }
+sub networks   { shift->_elem('networks',       @_) }
+sub prompt_str { shift->_elem('prompt_str',     @_) }
+sub tag_str    { shift->_elem('tag_str',        @_) }
+sub order      { shift->_elem('order',          @_) }
+sub limit      { shift->_elem('limit',          @_) }
+sub services   { shift->_elem('services',       @_) }
+sub pager      { shift->_elem('pager',          @_) }
+sub format     { shift->_elem('format',         @_) }
+sub chars      { shift->_elem('chars',          @_) }
+sub debug      { shift->_elem('debug',          @_) }
+sub history    { shift->_elem('historyfile',    @_) }
 
 #----------------------------------------------------------------------------
 # Public API
 
+#
+# Connect/Disconnect
+#
 
 sub connect {
     my ($self,$plug,$config) = @_;
@@ -78,14 +93,11 @@ sub connect {
     $self->_reset_networks;
 }
 
-#
-# Connect/Disconnect
-#
-
 *run_connect = \&connect;
 sub smry_connect { "connect to a service" }
 sub help_connect {
     <<'END';
+
 Connects to a named service. Requires the name of the service, together with
 the username and password to access the service.
 END
@@ -105,6 +117,7 @@ sub run_disconnect {
 sub smry_disconnect { "disconnect from a service" }
 sub help_disconnect {
     <<'END';
+
 Disconnects from the named service.
 END
 }
@@ -129,6 +142,7 @@ sub run_use {
 sub smry_use { "set primary service" }
 sub help_use {
     <<'END';
+
 Set the primary service for message list commands.
 END
 }
@@ -153,6 +167,7 @@ sub run_followers {
 sub smry_followers { "display followers' status" }
 sub help_followers {
     <<'END';
+
 Displays the most recent status messages from each of your followers.
 END
 }
@@ -169,6 +184,7 @@ sub run_friends {
 sub smry_friends { "display friends' status" }
 sub help_friends {
     <<'END';
+
 Displays the most recent status messages from each of your friends.
 END
 }
@@ -207,6 +223,7 @@ sub run_user {
 sub smry_user { "display a user profile" }
 sub help_user {
     <<'END';
+
 Displays a user profile.
 END
 }
@@ -241,6 +258,7 @@ sub run_follow {
 sub smry_follow { "follow a named user" }
 sub help_follow {
     <<'END';
+
 Sends a follow request to the name user. If status updates are not protected
 you can start seeing that user's updates immediately. Otherwise you will have
 to wait until the user accepts your request.
@@ -263,6 +281,7 @@ sub run_unfollow {
 sub smry_unfollow { "unfollow a named user" }
 sub help_unfollow {
     <<'END';
+
 Allows you to unfollow a user.
 END
 }
@@ -280,6 +299,7 @@ sub run_friends_timeline {
 sub smry_friends_timeline { "display friends' status as a timeline" }
 sub help_friends_timeline {
     <<'END';
+
 Displays the most recent status messages within your friends timeline.
 END
 }
@@ -301,6 +321,7 @@ sub run_public_timeline {
 sub smry_public_timeline { "display public status as a timeline" }
 sub help_public_timeline {
     <<'END';
+
 Displays the most recent status messages within the public timeline.
 END
 }
@@ -330,6 +351,7 @@ sub run_user_timeline {
 sub smry_user_timeline { "display named user statuses as a timeline" }
 sub help_user_timeline {
     <<'END';
+
 Displays the most recent status messages for a specified user.
 END
 }
@@ -353,6 +375,7 @@ sub run_replies {
 sub smry_replies { "display reply messages that refer to you" }
 sub help_replies {
     <<'END';
+
 Displays the most recent reply messages that refer to you.
 END
 }
@@ -386,6 +409,7 @@ sub run_direct_messages {
 sub smry_direct_messages { "display direct messages that have been sent to you" }
 sub help_direct_messages {
     <<'END';
+
 Displays the direct messages that have been sent to you.
 END
 }
@@ -429,6 +453,7 @@ sub run_send_message {
 sub smry_send_message { "send a direct message" }
 sub help_send_message {
     <<'END';
+
 Posts a message (upto 140 characters), to a named user.
 END
 }
@@ -476,6 +501,7 @@ sub run_update {
 sub smry_update { "post a message" }
 sub help_update {
     <<'END';
+
 Posts a message (upto 140 characters).
 END
 }
@@ -529,6 +555,7 @@ ABOUT
 sub smry_version { "display the current version of maisha" }
 sub help_version {
     <<'END';
+
 Displays the current version of maisha.
 END
 }
@@ -538,12 +565,43 @@ sub run_version {
 
 
 #
+# Debugging
+#
+
+sub smry_debug { "turn on/off debugging" }
+sub help_debug {
+    <<'END';
+
+Some commands may return unexpected results. More verbose output can be 
+returned when debugging is turned on. Set 'debug on' or 'debug off' to 
+turn the debugging functionality on or off respectively.
+END
+}
+sub run_debug {
+    my ($self,$state) = @_;
+
+    if(!$state) {
+        print "Please use 'on' or 'off' with debug command\n\n";
+    } elsif($state eq 'on') {
+        $self->debug(1);
+        print "Debugging is ON\n\n";
+    } elsif($state eq 'off') {
+        $self->debug(0);
+        print "Debugging is OFF\n\n";
+    } else {
+        print "Please use 'on' or 'off' with debug command\n\n";
+    }
+};
+
+
+#
 # Quit/Exit
 #
 
 sub smry_quit { "alias to exit" }
 sub help_quit {
     <<'END';
+
 Exits the program.
 END
 }
@@ -558,7 +616,40 @@ sub run_quit {
 
 sub postcmd {
     my ($self, $handler, $cmd, $args) = @_;
-    print $self->networks   unless ($handler && ($$handler =~ /^comp_/));
+    #print "$$handler - $$cmd\n" if($self->debug);
+    return  if($handler && $$handler =~ /^(comp|help|smry)_/);
+    return  if($cmd     && $$cmd     =~ /^(q|quit)$/);
+
+    push @{$self->{history}}, $self->line;
+    print $self->networks;
+}
+
+sub preloop {
+    my $self = shift;
+    my $file = $self->history;
+    if($file && -f $file) {
+        my $fh = IO::File->new($file,'r') or return;
+        while(<$fh>) {
+            s/\s+$//;
+            next    unless($_);
+            $self->term->addhistory($_);
+            push @{$self->{history}}, $_;
+        }
+    }
+}
+
+sub postloop {
+    my $self = shift;
+    if(my $file = $self->history) {
+        my @history = grep { $_ && $_ !~ /^(q|quit)$/ } @{$self->{history}};
+        if(@history) {
+            mkpath(dirname($file));
+            my $fh = IO::File->new($file,'w+') or return;
+            splice( @history, 0, (scalar(@history) - 100))  if(@history > 100);
+            print $fh join("\n", @history);
+            $fh->close;
+        }
+    }
 }
 
 #----------------------------------------------------------------------------
@@ -599,12 +690,14 @@ sub _run_snapshot {
     if($max) {
         for my $page (1..$max) {
             my $ref = {page => $page};
-            my $ret = $self->_command($cmd,$ref);
-            push @res, @$ret;
+            my $ret;
+            eval { $ret = $self->_command($cmd,$ref) };
+            push @res, @$ret    if($ret);
         }
     } else {
-        my $ret = $self->_command($cmd);
-        push @res, @$ret;
+        my $ret;
+        eval { $ret = $self->_command($cmd) };
+        push @res, @$ret    if($ret);
     }
 
     return  unless(@res);
@@ -620,9 +713,9 @@ sub _run_timeline {
     my @res;
     for my $page (1..$max) {
         my $ref = {id => $user, page => $page};
-        my $ret = $self->_command($cmd,$ref);
-        next    unless($ret);
-        push @res, @$ret;
+        my $ret;
+        eval { $ret = $self->_command($cmd,$ref) };
+        push @res, @$ret    if($ret);
     }
 
     return  unless(@res);
@@ -644,7 +737,7 @@ sub _command {
     eval { $ret = $service->$method(@_) };
 
     if ($@) {
-        print "Command $cmd failed :( [$@]\n";
+        print "Command $cmd failed :(" . ($self->debug ? " [$@]" : '') . "\n";
     } elsif(!$ret) {
         print "Command $cmd failed :(\n";
     } else {
@@ -711,6 +804,11 @@ sub _format_message {
     $network =~ s!^.*?\[([^\]]+)\].*!$1!s;
 
     my $timestamp = $mess->{created_at};
+    my (@dt) = $timestamp =~ /\w+\s+(\w+)\s+(\d+)\s+([\d:]+)\s+\S+\s+(\d+)/; # Sat Oct 13 19:01:19 +0000 2012
+    my $datetime = sprintf "%02d/%02d/%04d %s", $dt[1], $months{$dt[0]}, $dt[3], $dt[2];
+    my $date = sprintf "%02d/%02d/%04d", $dt[1], $months{$dt[0]}, $dt[3];
+    my $time = $dt[2];
+
     if($who) {
         $user = $mess->{$who}{screen_name};
         $text = $mess->{text};
@@ -724,6 +822,9 @@ sub _format_message {
     $format =~ s!\%U!$user!g;
     $format =~ s!\%M!$text!g;
     $format =~ s!\%T!$timestamp!g;
+    $format =~ s!\%D!$datetime!g;
+    $format =~ s!\%t!$time!g;
+    $format =~ s!\%d!$date!g;
     $format =~ s!\%N!$network!g;
     return $format;
 }
@@ -830,7 +931,10 @@ as:
 
   %U - username or screen name
   %M - status message
-  %T - timestamp
+  %T - timestamp (e.g. Sat Oct 13 19:29:17 +0000 2012)
+  %D - datetime (e.g. 13/10/2012 19:29:17)
+  %d - date only (e.g. 13/10/2012)
+  %t - time only (e.g. 19:29:17)
   %N - network
 
 =item * chars
@@ -840,6 +944,14 @@ terminal window. Unfortunately there isn't currently a detection method for
 knowing the exact screen width being used. As such you can specify a width for
 the wrapper to use to ensure the messages are correctly line wrapped. The
 default setting is 80.
+
+=item * debug
+
+Boolean setting for debugging messages.
+
+=item * history
+
+Provides the history file, if available.
 
 =back
 
@@ -1137,6 +1249,25 @@ The quit methods provide the handlers for the 'version' command.
 
 =back
 
+=head2 Debug Methods
+
+The debug methods provide more verbose error mesages if commands fail.
+
+The debug command has two optional parameters:
+
+  maisha> debug [on|off]
+
+  maisha> debug on
+  maisha> debug off
+
+=over 4
+
+=item * run_debug
+=item * help_debug
+=item * smry_debug
+
+=back
+
 =head2 Quit Methods
 
 The quit methods provide the handlers for the 'quit' command. Note that both
@@ -1154,13 +1285,15 @@ The quit methods provide the handlers for the 'quit' command. Note that both
 
 =back
 
-=head2 Post Command Methods
+=head2 Internal Shell Methods
 
-Used to display the current networks list above the command line.
+Used internally to interface with the underlying shell application.
 
 =over 4
 
 =item * postcmd
+=item * preloop
+=item * postloop
 
 =back
 
@@ -1185,13 +1318,14 @@ L<Term::Shell>
 
 =head1 AUTHOR
 
-  Copyright (c) 2009-2010 Barbie <barbie@cpan.org> for Grango.org.
+  Barbie, <barbie@cpan.org>
+  for Miss Barbell Productions <http://www.missbarbell.co.uk>.
 
-=head1 LICENSE
+=head1 COPYRIGHT AND LICENSE
 
-  This program is free software; you can redistribute it and/or modify it
-  under the same terms as Perl itself.
+  Copyright (C) 2009-2012 by Barbie
 
-  See http://www.perl.com/perl/misc/Artistic.html
+  This module is free software; you can redistribute it and/or
+  modify it under the Artistic License v2.
 
 =cut

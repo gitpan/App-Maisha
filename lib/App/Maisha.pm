@@ -3,9 +3,11 @@ package App::Maisha;
 use strict;
 use warnings;
 
-our $VERSION = '0.15';
+our $VERSION = '0.16';
 
 #----------------------------------------------------------------------------
+
+=encoding utf8
 
 =head1 NAME
 
@@ -69,6 +71,10 @@ sub load_config {
     croak("Could not load configuration file")  if(!$config);
     croak("Maisha expectes a config file that can be decoded to a HASH")    if(ref $config ne 'HASH');
 
+    # some systems use a broken pager, so force the internal parser to be used
+    $self->{pager} = $ENV{PAGER};
+    $ENV{PAGER} = '';
+
     return $config;
 }
 
@@ -76,6 +82,9 @@ sub setup {
     my $self   = shift;
     my $config = $self->config;
     my $shell  = $self->shell(App::Maisha::Shell->new);
+
+    my $debug   = $config->{CONFIG}{debug}   || 0;
+    my $history = $config->{CONFIG}{history} || '';
 
     my $tag = $config->{CONFIG}{tag};
     $tag ||= '[from maisha]';
@@ -85,6 +94,9 @@ sub setup {
     $prompt ||= 'maisha>';
     $prompt =~ s/\s*$/ /;
 
+
+    $shell->debug($debug);
+    $shell->history($history);
     $shell->prompt_str($prompt);
     $shell->tag_str($tag);
     $shell->pager( defined $config->{CONFIG}{pager}  ? $config->{CONFIG}{pager}  : 1 );
@@ -104,7 +116,7 @@ sub setup {
 
     # in some environments 'Wide Character' warnings are emited where unicode
     # strings are seen in status messages. This suppresses them.
-    binmode STDOUT, ":utf8";
+    binmode STDOUT, ":encoding(UTF-8)";
 }
 
 sub run {
@@ -112,6 +124,8 @@ sub run {
     my $shell = $self->shell;
     $shell->postcmd();
     $shell->cmdloop();
+
+    $ENV{PAGER} = $self->{pager};
 }
 
 1;
@@ -166,13 +180,14 @@ Dave Cross, Robert Rothenberg and Steffen Müller.
 
 =head1 AUTHOR
 
-  Copyright (c) 2009-2010 Barbie <barbie@cpan.org> for Grango.org.
+  Barbie, <barbie@cpan.org>
+  for Miss Barbell Productions <http://www.missbarbell.co.uk>.
 
-=head1 LICENSE
+=head1 COPYRIGHT AND LICENSE
 
-  This program is free software; you can redistribute it and/or modify it
-  under the same terms as Perl itself.
+  Copyright (C) 2009-2012 by Barbie
 
-  See http://www.perl.com/perl/misc/Artistic.html
+  This module is free software; you can redistribute it and/or
+  modify it under the Artistic License v2.
 
 =cut

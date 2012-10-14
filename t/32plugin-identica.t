@@ -1,7 +1,5 @@
-#!perl
-
+#!/usr/bin/perl -w
 use strict;
-use warnings;
 
 use Test::More tests => 29;
 use App::Maisha::Plugin::Identica;
@@ -22,7 +20,7 @@ BEGIN {
             update
             show_user
             user_timeline
-            friends_timeline
+            following_timeline
             public_timeline
             replies
             new_direct_message
@@ -30,6 +28,7 @@ BEGIN {
             sent_direct_messages
             create_friend
             destroy_friend
+            following
 
             access_token
             access_token_secret
@@ -94,4 +93,3 @@ SKIP: {
       }
     }
 }
-
