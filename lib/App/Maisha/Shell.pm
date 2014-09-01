@@ -3,7 +3,7 @@ package App::Maisha::Shell;
 use strict;
 use warnings;
 
-our $VERSION = '0.19';
+our $VERSION = '0.20';
 
 #----------------------------------------------------------------------------
 
@@ -403,6 +403,7 @@ sub run_direct_messages {
     my $num  = shift;
 
     my ($limit,$pages,$count) = $self->_get_limits($max{home_timeline},$num,$self->limit);
+    $pages ||= 1;
 
     my (@pages,@results,$max_id);
     for my $page (1 .. $pages) {
@@ -455,6 +456,12 @@ sub smry_dm { "alias to direct_messages" }
 
 sub run_send_message {
     my $self = shift;
+    
+    unless($self->line()) {
+        print "cannot send an empty message\n\n";
+        return;
+    }
+
     my (undef,$user,$mess) = split(/\s+/,$self->line(),3);
 
     $user =~ s/^\@//    if($user);
@@ -507,6 +514,12 @@ sub smry_send { "alias to send_message" }
 
 sub run_update {
     my $self = shift;
+    
+    unless($self->line()) {
+        print "cannot send an empty message\n\n";
+        return;
+    }
+
     my (undef,$text) = split(' ',$self->line(),2);
     $text =~ s/^\s+//;
     $text =~ s/\s+$//;
@@ -518,7 +531,7 @@ sub run_update {
 
     my $len = length $text;
     if($len < 140) {
-        my $tag = $self->tag_str;
+        my $tag = $self->tag_str || '';
         $text .= " " if ($text =~ /\S/);
         $text .= $tag   if(length "$text$tag" <= 140);
     } elsif($len > 140) {
@@ -595,6 +608,8 @@ Provides a brief summary about maisha.
 END
 }
 sub run_about {
+    my @time = localtime(time);
+    $time[5] += 1900;
     print <<ABOUT;
 
 Maisha is a command line application that can interface with a number of online
@@ -608,8 +623,10 @@ particular online service, it seemed an appropriate choice of name. After all
 you are posting status updates about your life :)
 
 Maisha is written in Perl, and freely available as Open Source under the Perl
-Artistic license. Copyright (c) 2009 Barbie for Grango.org, the Open Source
-development outlet of Miss Barbell Productions. See http://maisha.grango.org.
+Artistic license. Copyright (c) 2009-$time[5] Barbie for Grango.org, the Open 
+Source development outlet of Miss Barbell Productions. 
+    
+See http://maisha.grango.org for further information.
 
 Version: $VERSION
 
@@ -629,7 +646,7 @@ Displays the current version of maisha.
 END
 }
 sub run_version {
-    print "\nVersion: $VERSION";
+    print "\nVersion: $VERSION\n";
 }
 
 
@@ -815,6 +832,8 @@ sub _run_timeline {
     my ($self,$cmd,$max,$user,$num) = @_;
     my ($limit,$pages,$count) = $self->_get_limits($max,$num,$self->limit);
 
+    $pages ||= 1;
+
     my (@pages,@results,$max_id);
     for my $page (1 .. $pages) {
         my $ref = {};
@@ -894,7 +913,7 @@ sub _commands {
         }
     }
 
-    return;
+    return 1;
 }
 
 sub _print_messages {

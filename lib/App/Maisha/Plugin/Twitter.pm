@@ -3,7 +3,7 @@ package App::Maisha::Plugin::Twitter;
 use strict;
 use warnings;
 
-our $VERSION = '0.19';
+our $VERSION = '0.20';
 
 #----------------------------------------------------------------------------
 # Library Modules
@@ -130,6 +130,11 @@ sub _build_users {
         $f = $self->api->followers();
         if($f && @$f)   { for(@$f) { next unless($_); $users{$_->{screen_name}} = 1 } }
     };
+
+    if($@) {
+        warn "Error retrieving friends/followers from Twitter: $@\n";
+        return;
+    }
 
     $self->users(\%users);
 }

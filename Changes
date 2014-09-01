@@ -1,6 +1,17 @@
 Changes log for App-Maisha
 ==========================
 
+0.20    2014-09-01
+        - fixed license fields in META.json to be lists.
+        - fixed distribution name in Makefile.PL.
+        - extended test suite.
+        - clean up method returns.
+        - added current year to copyright notice for 'about' command.
+        - Test::Effects and Devel::Cover don't work together, so moving new
+          run_methods test script to /xt/ directory, and reverting original
+          script back to eval tests.
+        - added config tests and data.
+
 0.19    2014-05-16
         - added LICENSE file.
         - fixed distribution name in META.
