@@ -1,6 +1,10 @@
 Changes log for App-Maisha
 ==========================
 
+0.21    2014-09-09
+        - added mock skips for plugin tests.
+        - added configuration skips if config loaders not installed.
+
 0.20    2014-09-01
         - fixed license fields in META.json to be lists.
         - fixed distribution name in Makefile.PL.
